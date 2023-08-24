@@ -7,6 +7,7 @@ import shutil
 import sys
 import time
 import urllib
+import filecmp
 
 import htsget
 import psutil
@@ -15,6 +16,7 @@ from tqdm import tqdm
 from pyega3.libs import utils
 
 DOWNLOAD_FILE_MEMORY_BUFFER_SIZE = 32 * 1024
+DOUBLE_CHECK_MODE = True
 
 
 class DataFile:
@@ -200,6 +202,7 @@ class DataFile:
 
         final_file_name = f'{file_name}-from-{str(start_pos)}-len-{str(length)}.slice'
         file_name = final_file_name + '.tmp'
+        dc_file_name = file_name + '2'
 
         self.temporary_files.add(file_name)
 
@@ -218,24 +221,35 @@ class DataFile:
                 'Range': f'bytes={range_start}-{range_end}'
             }
 
-            with self.data_client.get_stream(path, extra_headers) as r:
-                with open(file_name, 'ba') as file_out:
-                    self.temporary_files.add(file_name)
-                    for chunk in r.iter_content(DOWNLOAD_FILE_MEMORY_BUFFER_SIZE):
-                        file_out.write(chunk)
-                        pbar and pbar.update(len(chunk))
+            def dl_slice_copy(fname_tmp, tpbar=None):
+                with self.data_client.get_stream(path, extra_headers) as r:
+                    with open(fname_tmp, 'ba') as file_out:
+                        self.temporary_files.add(fname_tmp)
+                        for chunk in r.iter_content(DOWNLOAD_FILE_MEMORY_BUFFER_SIZE):
+                            file_out.write(chunk)
+                            tpbar and tpbar.update(len(chunk))
 
-            total_received = os.path.getsize(file_name)
+                total_received = os.path.getsize(fname_tmp)
 
-            if total_received != length:
-                raise Exception(f"Slice error: received={total_received}, requested={length}, file='{file_name}'")
+                if total_received != length:
+                    raise Exception(f"Slice error: received={total_received}, requested={length}, file='{file_name}'")
+
+            dl_slice_copy(file_name, pbar)
+            if DOUBLE_CHECK_MODE:
+                dl_slice_copy(dc_file_name)
+                if not filecmp.cmp(file_name, dc_file_name):
+                    raise Exception(f"Slice error: two attempts yielded different data. file='{file_name}'")
 
         except Exception as e:
             if os.path.exists(file_name):
                 os.remove(file_name)
+            if os.path.exists(dc_file_name):
+                os.remove(dc_file_name)
             raise
 
         os.rename(file_name, final_file_name)
+        if os.path.exists(dc_file_name):
+            os.remove(dc_file_name)
 
         return final_file_name
 
