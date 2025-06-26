@@ -165,13 +165,16 @@ class DataFile:
 
             downloaded_file_total_size = sum(os.path.getsize(f) for f in results)
             if downloaded_file_total_size == file_size:
-                utils.merge_bin_files_on_disk(output_file, results, downloaded_file_total_size)
+                # Get MD5 calculated during merge operation
+                received_file_md5 = utils.merge_bin_files_on_disk(output_file, results, downloaded_file_total_size)
+                logging.info("MD5 calculated during file merge")
+            else:
+                # Fallback to original method if file sizes don't match
+                received_file_md5 = utils.merge_bin_files_on_disk_legacy(output_file, results, downloaded_file_total_size)
+                logging.info("Calculating md5 (this operation can take a long time depending on the file size)")
+                received_file_md5 = utils.md5(output_file, file_size)
 
         not_valid_server_md5 = len(str(check_sum or '')) != 32
-
-        logging.info("Calculating md5 (this operation can take a long time depending on the file size)")
-
-        received_file_md5 = utils.md5(output_file, file_size)
 
         logging.info("Verifying file checksum")
 
